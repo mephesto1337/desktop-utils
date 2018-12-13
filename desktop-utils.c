@@ -20,6 +20,7 @@ static int has_lock = false;
 void daemon_sighandler(int signum);
 void __exit_daemon_uniq(void) __attribute__((destructor));
 inline bool daemonize(void) { return daemonize_uniq(NULL); }
+void write_pid(int fd);
 
 bool daemonize_uniq(const char *filename) {
 #ifdef DEBUG
@@ -45,6 +46,9 @@ bool daemonize_uniq(const char *filename) {
         CHK_NEG(close(STDIN_FILENO));
         CHK_NEG(close(STDOUT_FILENO));
         CHK_NEG(close(STDERR_FILENO));
+        if (filename && has_lock) {
+            write_pid(daemon_handle);
+        }
         in_son = true;
         return true;
     } else {
@@ -87,18 +91,13 @@ fail:
 
 bool lockfile(const char *filename, int *handle) {
     int fd;
-    char pid[8];
-    size_t pid_len;
 
     CHK_NEG(fd = open(filename, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR));
-    pid_len = (size_t)snprintf(pid, sizeof(pid) - 1, "%d\n", getpid());
-    CHK_NEG(write(fd, (const void *)pid, pid_len));
     *handle = fd;
 
     return true;
 
 fail:
-    close(fd);
     return false;
 }
 
@@ -118,7 +117,26 @@ void daemon_sighandler(int signum) {
         unlockfile(lock_filename, &daemon_handle);
         unlink(lock_filename);
     }
+
     exit(EXIT_SUCCESS);
+}
+
+void write_pid(int fd) {
+    char pid[8];
+    size_t pid_len;
+    size_t off = 0;
+    ssize_t n;
+
+    pid_len = (size_t)snprintf(pid, sizeof(pid) - 1, "%d\n", getpid());
+    do {
+        n = write(fd, (const void *)&pid[off], pid_len);
+        if (n <= 0) {
+            exit(EXIT_FAILURE);
+        } else {
+            off += n;
+            pid_len -= n;
+        }
+    } while (pid_len > 0);
 }
 
 #ifdef WITH_LOCK
