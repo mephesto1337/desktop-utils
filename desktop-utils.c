@@ -17,7 +17,7 @@ static char lock_filename[256];
 static int in_son = false;
 static int has_lock = false;
 
-void sighandler(int signum);
+void daemon_sighandler(int signum);
 
 void __exit_daemon_uniq(void) __attribute__((destructor));
 
@@ -31,10 +31,16 @@ bool daemonize_uniq(const char *filename) {
     return true;
 #else
     pid_t son;
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = daemon_sighandler;
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGTERM);
 
     if ( filename ) {
-        strncpy(lock_filename, filename, sizeof(lock_filename));
-        CHK_NEG(signal(SIGTERM, sighandler));
+        strncpy(lock_filename, filename, sizeof(lock_filename) - 1);
+        CHK_NEG(sigaction(SIGTERM, &sa, NULL));
         CHK_FALSE(has_lock = lockfile(lock_filename, &daemon_handle));
     }
 
@@ -70,6 +76,7 @@ bool spawn(char *const cmd[], char *const envp[]) {
         if ( execve(cmd[0], cmd, envp) < 0 ) {
             exit(EXIT_FAILURE);
         } else {
+            // Not reached
             exit(EXIT_SUCCESS);
         }
     } else {
@@ -101,7 +108,7 @@ bool unlockfile(const char *filename, int *handle) {
     return true;
 }
 
-void sighandler(int signum) {
+void daemon_sighandler(int signum) {
     debug("Caught signal %d", signum);
     UNUSED(signum);
 
